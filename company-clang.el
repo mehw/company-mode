@@ -80,7 +80,7 @@ or automatically through a custom `company-clang-prefix-guesser'."
     (insert-file-contents-literally file nil beg end)
     (buffer-string)))
 
-(defcustom company-clang-parse-documentation nil
+(defcustom company-clang-parse-documentation t
   "When non-nil, clang will parse completion's comments/documentation."
   :type 'boolean)
 
@@ -191,12 +191,24 @@ properties."
              "objective-c" "objective-c++")
        (substring (symbol-name major-mode) 0 -5)))
 
+;; BUGTESTING (time measurement)
+;; ----------
+(defvar parse-time-start nil)
+(defvar parse-time-stop nil)
+;; ----------
+
 (defun company-clang--parse-output (prefix _objc)
   (goto-char (point-min))
   (let ((pattern (format company-clang--completion-pattern
                          (regexp-quote prefix)))
         (case-fold-search nil)
         lines match)
+    ;; BUGTESTING (time measurement)
+    ;; ----------
+    (when (eq parse-time-start nil)
+      (setq parse-time-start (current-time-pico))
+      (message "parse-start: %s" parse-time-start))
+    ;; ----------
     (while (re-search-forward pattern nil t)
       (setq match (match-string-no-properties 1))
       (unless (equal match "Pattern")
@@ -211,6 +223,14 @@ properties."
         (push match lines)
         (let ((doc (match-string-no-properties 3)))
           (push (list match doc) company-clang-summary-list))))
+    ;; BUGTESTING (time measurement)
+    ;; ----------
+    (setq parse-time-stop (current-time-pico))
+    (let ((delta (- parse-time-stop parse-time-start)))
+      (message "parse-end: %s" (current-time-pico))
+      (message "parse-delta: %s" (time-pico-to-seconds delta)))
+    (setq parse-time-start nil)
+    ;; ----------
     lines))
 
 (defun company-clang--meta (candidate)
@@ -259,6 +279,12 @@ properties."
         (setq buffer-read-only t)
         (goto-char (point-min))))))
 
+;; BUGTESTING (time measurement)
+;; ----------
+(defvar process-time-start nil)
+(defvar process-time-stop nil)
+;; ----------
+
 (defun company-clang--start-process (prefix callback &rest args)
   (setq company-clang-summary-list nil)
   (let ((objc (derived-mode-p 'objc-mode))
@@ -269,6 +295,12 @@ properties."
         (funcall callback nil)
       (let ((process (apply #'start-process "company-clang" buf
                             company-clang-executable args)))
+	;; BUGTESTING (time measurement)
+        ;; ----------
+	(when (eq process-time-start nil)
+	  (setq process-time-start (current-time-pico))
+	  (message "process-start: %s" process-time-start))
+        ;; ----------
         (set-process-sentinel
          process
          (lambda (proc status)
@@ -280,6 +312,14 @@ properties."
                   (unless (eq 0 res)
                     (company-clang--handle-error res args))
                   ;; Still try to get any useful input.
+		  ;; BUGTESTING (time measurement)
+                  ;; ----------
+                  (setq process-time-stop (current-time-pico))
+		  (let ((delta (- process-time-stop process-time-start)))
+		    (message "process-end: %s" (current-time-pico))
+		    (message "process-delta: %s" (time-pico-to-seconds delta)))
+		  (setq process-time-start nil)
+                  ;; ----------
                   (company-clang--parse-output prefix objc)))))))
         (unless (company-clang--auto-save-p)
           (send-region process (point-min) (point-max))
@@ -381,6 +421,13 @@ With Clang versions before 2.9, we have to save the buffer before
 performing completion.  With Clang 2.9 and later, buffer contents are
 passed via standard input."
   (interactive (list 'interactive))
+  ;; BUGTESTING (time measurement)
+  ;; ----------
+  (when (and (eq time-start nil)
+	     (eq command 'prefix))
+    (setq time-start (current-time-pico))
+    (message "prefix: %s" time-start))
+  ;; ----------
   (cl-case command
     (interactive (company-begin-backend 'company-clang))
     (init (when (memq major-mode company-clang-modes)

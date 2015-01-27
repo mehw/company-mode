@@ -610,6 +610,12 @@ asynchronous call into synchronous.")
   (let ((keymap (make-sparse-keymap)))
     (define-key keymap "\e\e\e" 'company-abort)
     (define-key keymap "\C-g" 'company-abort)
+    ;; BUGTESTING (fetch popup info lag test)
+    ;; ----------
+    (define-key keymap (kbd "M-r") 'company-select-random)
+    (define-key keymap (kbd "M-f") 'company-select-first)
+    (define-key keymap (kbd "M-l") 'company-select-last)
+    ;; ----------
     (define-key keymap (kbd "M-n") 'company-select-next)
     (define-key keymap (kbd "M-p") 'company-select-previous)
     (define-key keymap (kbd "<down>") 'company-select-next-or-abort)
@@ -637,6 +643,30 @@ asynchronous call into synchronous.")
   "Keymap that is enabled during an active completion.")
 
 (defvar company--disabled-backends nil)
+
+;; BUGTESTING (time measurement)
+;; ----------
+(defvar time-start nil)
+(defvar time-stop nil)
+
+(defun current-time-pico nil
+  "Return `current-time' in pico-seconds."
+  (let ((time (current-time))
+	(hi) (lo) (ms) (ps))
+    (setq hi (nth 0 time))
+    (setq lo (nth 1 time))
+    (setq ms (nth 2 time))
+    (setq ps (nth 3 time))
+    (setq hi (* hi (expt 2 16)))
+    (+ (* (+ hi lo) (expt 10 12))
+       (* ms (expt 10 6))
+       	ps)))
+
+(defun time-pico-to-seconds (pico)
+  "Convert pico-seconds into seconds."
+  (let ((exponent (expt 10 -12)))
+    (* pico exponent)))
+;; ----------
 
 (defun company-init-backend (backend)
   (and (symbolp backend)
@@ -1783,6 +1813,27 @@ followed by `company-search-toggle-filtering'."
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;; BUGTESTING (fetch popup info lag test)
+;; ----------
+(defun company-select-random ()
+  "Select the first candidate in the list."
+  (interactive)
+  (when (company-manual-begin)
+    (company-set-selection (random company-candidates-length))))
+
+(defun company-select-first ()
+  "Select the first candidate in the list."
+  (interactive)
+  (when (company-manual-begin)
+    (company-set-selection 0)))
+
+(defun company-select-last ()
+  "Select the last candidate in the list."
+  (interactive)
+  (when (company-manual-begin)
+    (company-set-selection company-candidates-length)))
+;; ----------
+
 (defun company-select-next ()
   "Select the next candidate in the list."
   (interactive)
@@ -2470,6 +2521,14 @@ Returns a negative number if the tooltip should be displayed above point."
       (max 3 (min company-tooltip-limit below)))))
 
 (defun company-pseudo-tooltip-show (row column selection)
+  ;; BUGTESTING (time measurement)
+  ;; ----------
+  (setq time-stop (current-time-pico))
+  (let ((delta (- time-stop time-start)))
+    (message "tooltip: %s" (current-time-pico))
+    (message "delta: %s" (time-pico-to-seconds delta)))
+  (setq time-start nil)
+  ;; ----------
   (company-pseudo-tooltip-hide)
   (save-excursion
 
