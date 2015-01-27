@@ -80,7 +80,7 @@ or automatically through a custom `company-clang-prefix-guesser'."
     (insert-file-contents-literally file nil beg end)
     (buffer-string)))
 
-(defcustom company-clang-parse-documentation t
+(defcustom company-clang-parse-documentation nil
   "When non-nil, clang will parse completion's comments/documentation."
   :type 'boolean)
 
