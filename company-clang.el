@@ -80,6 +80,76 @@ or automatically through a custom `company-clang-prefix-guesser'."
     (insert-file-contents-literally file nil beg end)
     (buffer-string)))
 
+(defcustom company-clang-parse-documentation t
+  "When non-nil, clang will parse completion's comments/documentation."
+  :type 'boolean)
+
+(defcustom company-clang-documentation-fill-column 70
+  "Column beyond which automatic line-wrapping should happen."
+  :type 'integer)
+
+(defcustom company-clang-documentation-justify 'full
+  "Specifies which  kind of justification to do."
+  :type '(choice (const :tag "Full" full)
+		 (const :tag "Left" left)
+		 (const :tag "Right" right)
+		 (const :tag "Center" center)
+                 (const :tag "None" none)))
+
+(defvar company-clang-summary-list
+  "Association list of tags and them related documentation.")
+
+(defun company-clang-meta-for-tag (tag)
+  "Extract the meta data of a TAG from `company-clang-summary-list'."
+  (let ((element (assoc tag company-clang-summary-list))
+	(match)
+	(meta))
+    (when element
+      (setq match (car element))
+      (setq meta (get-text-property 0 'meta match))
+      meta)))
+
+(defun company-clang-documentation-for-tag (tag)
+  "Extract the documentation of a TAG from `company-clang-summary-list'."
+  (let ((element (assoc tag company-clang-summary-list))
+	(doc))
+    (when element
+      (setq doc (car (cdr element)))
+      doc)))
+
+(defun company-clang-doc-buffer (tag)
+  "Create the documentation buffer for a TAG."
+  (let ((meta (company-clang-meta-for-tag tag))
+	(doc (company-clang-documentation-for-tag tag))
+	(emptylines "\n\n"))
+    (unless (and doc meta)
+      (setq emptylines ""))
+    (when (or doc meta)
+      (company-doc-buffer
+       (concat meta
+	       emptylines
+	       (company-clang-string-to-paragraph
+		doc
+		company-clang-documentation-fill-column
+		company-clang-documentation-justify))))))
+
+(defun company-clang-string-to-paragraph (str &optional len justify)
+  "Convert STR to a paragraph.
+
+LEN controls the width.
+
+JUSTIFY specifies which kind of justification to do: `full',
+`left', `right', `center', or `none' (equivalent to nil).  A
+value of t means handle each paragraph as specified by its text
+properties."
+  (when str
+    (with-temp-buffer
+      (insert str)
+      (when len
+	(setq fill-column len))
+      (fill-region (point-min) (point-max) justify)
+      (buffer-string))))
+
 (defun company-clang-guess-prefix ()
   "Try to guess the prefix file for the current buffer."
   ;; Prefixes seem to be called .pch.  Pre-compiled headers do, too.
@@ -109,8 +179,9 @@ or automatically through a custom `company-clang-prefix-guesser'."
 
 ;; TODO: Handle Pattern (syntactic hints would be neat).
 ;; Do we ever see OVERLOAD (or OVERRIDE)?
+;; Parse completion's comments/documentation too
 (defconst company-clang--completion-pattern
-  "^COMPLETION: \\_<\\(%s[a-zA-Z0-9_:]*\\)\\(?: : \\(.*\\)$\\)?$")
+   "^COMPLETION: \\_<\\(%s[a-zA-Z0-9_:]*\\) : \\(.*?\\)\\(?: : \\(.*\\)\\)\\{,1\\}$")
 
 (defconst company-clang--error-buffer-name "*clang-error*")
 
@@ -137,7 +208,9 @@ or automatically through a custom `company-clang-prefix-guesser'."
             (put-text-property 0 1 'meta
                                (company-clang--strip-formatting meta)
                                match)))
-        (push match lines)))
+        (push match lines)
+        (let ((doc (match-string-no-properties 3)))
+          (push (list match doc) company-clang-summary-list))))
     lines))
 
 (defun company-clang--meta (candidate)
@@ -187,6 +260,7 @@ or automatically through a custom `company-clang-prefix-guesser'."
         (goto-char (point-min))))))
 
 (defun company-clang--start-process (prefix callback &rest args)
+  (setq company-clang-summary-list nil)
   (let ((objc (derived-mode-p 'objc-mode))
         (buf (get-buffer-create "*clang-output*"))
         (process-adaptive-read-buffering nil))
@@ -227,6 +301,8 @@ or automatically through a custom `company-clang-prefix-guesser'."
 
 (defsubst company-clang--build-complete-args (pos)
   (append '("-fsyntax-only" "-Xclang" "-code-completion-macros")
+	  (when company-clang-parse-documentation
+	    (list "-Xclang" "-code-completion-brief-comments"))
           (unless (company-clang--auto-save-p)
             (list "-x" (company-clang--lang-option)))
           company-clang-arguments
@@ -322,6 +398,7 @@ passed via standard input."
                       (lambda (cb) (company-clang--candidates arg cb))))
     (meta       (company-clang--meta arg))
     (annotation (company-clang--annotation arg))
+    (doc-buffer (company-clang-doc-buffer arg))
     (post-completion (let ((anno (company-clang--annotation arg)))
                        (when (and company-clang-insert-arguments anno)
                          (insert anno)
