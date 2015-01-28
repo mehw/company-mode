@@ -648,6 +648,10 @@ asynchronous call into synchronous.")
 ;; ----------
 (defvar time-start nil)
 (defvar time-stop nil)
+(defvar parse-time-start nil)
+(defvar parse-time-stop nil)
+(defvar process-time-start nil)
+(defvar process-time-stop nil)
 
 (defun current-time-pico nil
   "Return `current-time' in pico-seconds."
@@ -1499,6 +1503,15 @@ from the rest of the back-ends in the group, if any, will be left at the end."
     (company-call-frontends 'update)))
 
 (defun company-cancel (&optional result)
+  ;; BUGTESTING (time measurement)
+  ;; ----------
+  (setq time-start nil)
+  (setq time-stop nil)
+  (setq parse-time-start nil)
+  (setq parse-time-stop nil)
+  (setq process-time-start nil)
+  (setq process-time-stop nil)
+  ;; ----------
   (unwind-protect
       (when company-prefix
         (if (stringp result)

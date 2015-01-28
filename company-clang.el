@@ -195,12 +195,6 @@ properties."
              "objective-c" "objective-c++")
        (substring (symbol-name major-mode) 0 -5)))
 
-;; BUGTESTING (time measurement)
-;; ----------
-(defvar parse-time-start nil)
-(defvar parse-time-stop nil)
-;; ----------
-
 (defun company-clang--parse-output (prefix _objc)
   (goto-char (point-min))
   (let ((pattern (format company-clang--completion-pattern
@@ -282,12 +276,6 @@ properties."
         (insert err)
         (setq buffer-read-only t)
         (goto-char (point-min))))))
-
-;; BUGTESTING (time measurement)
-;; ----------
-(defvar process-time-start nil)
-(defvar process-time-stop nil)
-;; ----------
 
 (defun company-clang--start-process (prefix callback &rest args)
   (setq company-clang-summary-list nil)
