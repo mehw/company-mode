@@ -80,8 +80,13 @@ or automatically through a custom `company-clang-prefix-guesser'."
     (insert-file-contents-literally file nil beg end)
     (buffer-string)))
 
-(defcustom company-clang-parse-documentation t
-  "When non-nil, clang will parse completion's comments/documentation."
+(defconst company-clang-parse-comments-version-min 3.2
+  "Starting from version 3.2 Clang can parse comments.")
+
+(defcustom company-clang-parse-comments t
+  "When non-nil, parse completions' documentation comments.
+
+Requires Clang version 3.2 or above."
   :type 'boolean)
 
 (defcustom company-clang-documentation-fill-column 70
@@ -89,49 +94,44 @@ or automatically through a custom `company-clang-prefix-guesser'."
   :type 'integer)
 
 (defcustom company-clang-documentation-justify 'full
-  "Specifies which  kind of justification to do."
+  "Specifies which kind of justification to do."
   :type '(choice (const :tag "Full" full)
-		 (const :tag "Left" left)
-		 (const :tag "Right" right)
-		 (const :tag "Center" center)
-                 (const :tag "None" none)))
+                 (const :tag "Left" left)
+                 (const :tag "Right" right)
+                 (const :tag "Center" center)
+                 (const :tag "None" nil)))
 
 (defvar company-clang-summary-list
   "Association list of tags and them related documentation.")
 
-(defun company-clang-meta-for-tag (tag)
-  "Extract the meta data of a TAG from `company-clang-summary-list'."
-  (let ((element (assoc tag company-clang-summary-list))
-	(match)
-	(meta))
-    (when element
-      (setq match (car element))
-      (setq meta (get-text-property 0 'meta match))
-      meta)))
+(defun company-clang-parse-comments-version-match nil
+  "Verify that the version of Clang in use can parse comments."
+  (>= company-clang--version
+      company-clang-parse-comments-version-min))
 
 (defun company-clang-documentation-for-tag (tag)
   "Extract the documentation of a TAG from `company-clang-summary-list'."
   (let ((element (assoc tag company-clang-summary-list))
-	(doc))
+        (doc))
     (when element
       (setq doc (car (cdr element)))
       doc)))
 
 (defun company-clang-doc-buffer (tag)
   "Create the documentation buffer for a TAG."
-  (let ((meta (company-clang-meta-for-tag tag))
-	(doc (company-clang-documentation-for-tag tag))
-	(emptylines "\n\n"))
+  (let ((meta (company-clang--meta tag))
+        (doc (company-clang-documentation-for-tag tag))
+        (emptylines "\n\n"))
     (unless (and doc meta)
       (setq emptylines ""))
     (when (or doc meta)
       (company-doc-buffer
        (concat meta
-	       emptylines
-	       (company-clang-string-to-paragraph
-		doc
-		company-clang-documentation-fill-column
-		company-clang-documentation-justify))))))
+               emptylines
+               (company-clang-string-to-paragraph
+                doc
+                company-clang-documentation-fill-column
+                company-clang-documentation-justify))))))
 
 (defun company-clang-string-to-paragraph (str &optional len justify)
   "Convert STR to a paragraph.
@@ -143,12 +143,17 @@ JUSTIFY specifies which kind of justification to do: `full',
 value of t means handle each paragraph as specified by its text
 properties."
   (when str
-    (with-temp-buffer
-      (insert str)
-      (when len
-	(setq fill-column len))
-      (fill-region (point-min) (point-max) justify)
-      (buffer-string))))
+    (if (or (eq justify 'full)
+            (eq justify 'left)
+            (eq justify 'right)
+            (eq justify 'center))
+        (with-temp-buffer
+          (insert str)
+          (when len
+            (setq fill-column len))
+          (fill-region (point-min) (point-max) justify)
+          (buffer-string))
+      str)))
 
 (defun company-clang-guess-prefix ()
   "Try to guess the prefix file for the current buffer."
@@ -179,9 +184,8 @@ properties."
 
 ;; TODO: Handle Pattern (syntactic hints would be neat).
 ;; Do we ever see OVERLOAD (or OVERRIDE)?
-;; Parse completion's comments/documentation too
 (defconst company-clang--completion-pattern
-   "^COMPLETION: \\_<\\(%s[a-zA-Z0-9_:]*\\) : \\(.*?\\)\\(?: : \\(.*\\)\\)\\{,1\\}$")
+  "^COMPLETION: \\_<\\(%s[a-zA-Z0-9_:]*\\)\\(?: : \\(.+?\\)?\\)?\\(?: : \\(.+?\\)?\\)?$")
 
 (defconst company-clang--error-buffer-name "*clang-error*")
 
@@ -295,11 +299,11 @@ properties."
         (funcall callback nil)
       (let ((process (apply #'start-process "company-clang" buf
                             company-clang-executable args)))
-	;; BUGTESTING (time measurement)
+        ;; BUGTESTING (time measurement)
         ;; ----------
-	(when (eq process-time-start nil)
-	  (setq process-time-start (current-time-pico))
-	  (message "process-start: %s" process-time-start))
+        (when (eq process-time-start nil)
+          (setq process-time-start (current-time-pico))
+          (message "process-start: %s" process-time-start))
         ;; ----------
         (set-process-sentinel
          process
@@ -312,13 +316,13 @@ properties."
                   (unless (eq 0 res)
                     (company-clang--handle-error res args))
                   ;; Still try to get any useful input.
-		  ;; BUGTESTING (time measurement)
+                  ;; BUGTESTING (time measurement)
                   ;; ----------
                   (setq process-time-stop (current-time-pico))
-		  (let ((delta (- process-time-stop process-time-start)))
-		    (message "process-end: %s" (current-time-pico))
-		    (message "process-delta: %s" (time-pico-to-seconds delta)))
-		  (setq process-time-start nil)
+                  (let ((delta (- process-time-stop process-time-start)))
+                    (message "process-end: %s" (current-time-pico))
+                    (message "process-delta: %s" (time-pico-to-seconds delta)))
+                  (setq process-time-start nil)
                   ;; ----------
                   (company-clang--parse-output prefix objc)))))))
         (unless (company-clang--auto-save-p)
@@ -341,8 +345,9 @@ properties."
 
 (defsubst company-clang--build-complete-args (pos)
   (append '("-fsyntax-only" "-Xclang" "-code-completion-macros")
-	  (when company-clang-parse-documentation
-	    (list "-Xclang" "-code-completion-brief-comments"))
+          (when (and company-clang-parse-comments
+                     (company-clang-parse-comments-version-match))
+            (list "-Xclang" "-code-completion-brief-comments"))
           (unless (company-clang--auto-save-p)
             (list "-x" (company-clang--lang-option)))
           company-clang-arguments
@@ -424,7 +429,7 @@ passed via standard input."
   ;; BUGTESTING (time measurement)
   ;; ----------
   (when (and (eq time-start nil)
-	     (eq command 'prefix))
+             (eq command 'prefix))
     (setq time-start (current-time-pico))
     (message "prefix: %s" time-start))
   ;; ----------
@@ -435,7 +440,10 @@ passed via standard input."
               (error "Company found no clang executable"))
             (setq company-clang--version (company-clang-version))
             (when (< company-clang--version company-clang-required-version)
-              (error "Company requires clang version 1.1"))))
+              (error "Company requires clang version 1.1"))
+            (when (and company-clang-parse-comments
+                       (not (company-clang-parse-comments-version-match)))
+              (error "The current version of Clang cannot parse comments"))))
     (prefix (and (memq major-mode company-clang-modes)
                  buffer-file-name
                  company-clang-executable

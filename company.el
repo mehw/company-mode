@@ -652,7 +652,7 @@ asynchronous call into synchronous.")
 (defun current-time-pico nil
   "Return `current-time' in pico-seconds."
   (let ((time (current-time))
-	(hi) (lo) (ms) (ps))
+        (hi) (lo) (ms) (ps))
     (setq hi (nth 0 time))
     (setq lo (nth 1 time))
     (setq ms (nth 2 time))
@@ -660,7 +660,7 @@ asynchronous call into synchronous.")
     (setq hi (* hi (expt 2 16)))
     (+ (* (+ hi lo) (expt 10 12))
        (* ms (expt 10 6))
-       	ps)))
+       ps)))
 
 (defun time-pico-to-seconds (pico)
   "Convert pico-seconds into seconds."
