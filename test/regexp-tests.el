@@ -26,18 +26,18 @@
 ;; (require 'company-regexp-tests)
 
 ;; DEFINE HERE THE PREFIXES
-(defvar test-prefixes
+(defvar company-regexp--test-prefixes
   '("foo"
     "bar"))
 
 ;; DEFINE HERE THE REGEXPS
-(defconst test-regexps
+(defconst company-regexp--test-regexps
   '("^COMPLETION: \\_<\\(%s[a-zA-Z0-9_:]*\\)\\(?: : \\(.+?\\)?\\)?\\(?: : \\(.+?\\)?\\)?$"
     "^COMPLETION: \\_<\\(%s[a-zA-Z0-9_:]*\\)\\(?: : \\(.+?\\)?\\)?\\(?: : \\(.+\\)?\\)?$"
     "^COMPLETION: \\_<\\(%s[a-zA-Z0-9_:]*\\)\\(?: : \\(.+?\\)?\\)?\\(?: : \\(.*\\)?\\)?$"))
 
 ;; DEFINE HERE THE TARGET STRINGS
-(defvar test-strings
+(defvar company-regexp--test-strings
   '(
    ;; expected result: no capture (no prefix)
    "COMPLETION: "
@@ -61,13 +61,13 @@
   (let ((results-list) (pattern) (match) (hit))
     (push ";;; begin of document" results-list)
     (with-current-buffer (get-buffer-create "*regexp-testing-ground*")
-      (dolist (t-prefix test-prefixes)
-        (dolist (t-regexp test-regexps)
+      (dolist (t-prefix company-regexp--test-prefixes)
+        (dolist (t-regexp company-regexp--test-regexps)
           (push (concat "prefix : \'" t-prefix "\'") results-list)
           (push (concat "regexp : \'" t-regexp "\'") results-list)
           (setq pattern (format t-regexp t-prefix))
           (push (concat " pattern: \'" pattern "\'") results-list)
-          (dolist (t-string test-strings)
+          (dolist (t-string company-regexp--test-strings)
             (erase-buffer)
             (insert t-string)
             (goto-char (point-min))
