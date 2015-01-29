@@ -34,6 +34,7 @@
 (defun regexp-testing-ground-run-tests nil
   (interactive)
   (let ((results-list) (pattern) (match) (hit))
+    (push ";;; begin of document" results-list)
     (with-current-buffer (get-buffer-create "*regexp-testing-ground*")
       (dolist (t-prefix test-prefixes)
         (dolist (t-regexp test-regexps)
@@ -56,7 +57,8 @@
               (push (concat
                      "   group " (number-to-string group) ": \'"
                      match "\'")
-                    results-list))))))
+                    results-list)))))
+      (push ";;; end of document" results-list))
     (setq results-list (reverse results-list))
     (with-current-buffer (get-buffer-create "*regexp-testing-ground*")
       (erase-buffer)
