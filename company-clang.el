@@ -80,7 +80,7 @@ or automatically through a custom `company-clang-prefix-guesser'."
     (insert-file-contents-literally file nil beg end)
     (buffer-string)))
 
-(defconst company-clang-parse-comments-version-min 3.2
+(defconst company-clang-parse-comments-min-version 3.2
   "Starting from version 3.2 Clang can parse comments.")
 
 (defcustom company-clang-parse-comments t
@@ -104,10 +104,10 @@ Requires Clang version 3.2 or above."
 (defvar company-clang-summary-list
   "Association list of tags and them related documentation.")
 
-(defun company-clang-parse-comments-version-match nil
+(defun company-clang--can-parse-comments nil
   "Verify that the version of Clang in use can parse comments."
   (>= company-clang--version
-      company-clang-parse-comments-version-min))
+      company-clang-parse-comments-min-version))
 
 (defun company-clang-documentation-for-tag (tag)
   "Extract the documentation of a TAG from `company-clang-summary-list'."
@@ -334,7 +334,7 @@ properties."
 (defsubst company-clang--build-complete-args (pos)
   (append '("-fsyntax-only" "-Xclang" "-code-completion-macros")
           (when (and company-clang-parse-comments
-                     (company-clang-parse-comments-version-match))
+                     (company-clang--can-parse-comments))
             (list "-Xclang" "-code-completion-brief-comments"))
           (unless (company-clang--auto-save-p)
             (list "-x" (company-clang--lang-option)))
@@ -430,7 +430,7 @@ passed via standard input."
             (when (< company-clang--version company-clang-required-version)
               (error "Company requires clang version 1.1"))
             (when (and company-clang-parse-comments
-                       (not (company-clang-parse-comments-version-match)))
+                       (not (company-clang--can-parse-comments)))
               (error "The current version of Clang cannot parse comments"))))
     (prefix (and (memq major-mode company-clang-modes)
                  buffer-file-name
