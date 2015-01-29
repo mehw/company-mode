@@ -52,11 +52,11 @@
               (if hit
                   (setq match (match-string-no-properties group))
                 (setq match nil))
-              (unless match
-                (setq match ""))
+              (if match
+                  (setq match (concat "\'" match "\'"))
+                (setq match "nil"))
               (push (concat
-                     "   group " (number-to-string group) ": \'"
-                     match "\'")
+                     "   group " (number-to-string group) ": " match)
                     results-list)))))
       (push ";;; end of document" results-list))
     (setq results-list (reverse results-list))
