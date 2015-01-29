@@ -56,7 +56,7 @@
    ;; expected result: group 1, 2, 3 ("Comment 1 : ")
    "COMPLETION: foobar : [#int#]foobar(<#int a#>) : Comment 1 : "))
 
-(defun company-regexp-tests-run-tests nil
+(defun company-regexp-tests-run nil
   (interactive)
   (let ((results-list) (pattern) (match) (hit))
     (push ";;; begin of document" results-list)
