@@ -101,26 +101,30 @@ Requires Clang version 3.2 or above."
                  (const :tag "Center" center)
                  (const :tag "None" nil)))
 
-(defvar company-clang-summary-list
-  "Association list of tags and them related documentation.")
+(defvar company-clang--doc-list
+  "Association list of tag's index + documentation.")
 
 (defun company-clang--can-parse-comments nil
   "Verify that the version of Clang in use can parse comments."
   (>= company-clang--version
       company-clang-parse-comments-min-version))
 
-(defun company-clang-documentation-for-tag (tag)
-  "Extract the documentation of a TAG from `company-clang-summary-list'."
-  (let ((element (assoc tag company-clang-summary-list))
-        (doc))
-    (when element
-      (setq doc (car (cdr element)))
-      doc)))
+(defun company-clang--candidate-index (candidate)
+  "Extract the index of from a CANDIDATE."
+  (get-text-property 0 'cc-tag candidate))
 
-(defun company-clang-doc-buffer (tag)
-  "Create the documentation buffer for a TAG."
-  (let ((meta (company-clang--meta tag))
-        (doc (company-clang-documentation-for-tag tag))
+(defun company-clang--candidate-doc (candidate)
+  "Extract the documentation of a CANDIDATE from `company-clang--doc-list'."
+  (let ((index (company-clang--candidate-index candidate))
+        (record))
+    (when index
+      (setq record (assoc index company-clang--doc-list))
+      (car (cdr record)))))
+
+(defun company-clang--doc-buffer (candidate)
+  "Create the documentation buffer for a CANDIDATE."
+  (let ((meta (company-clang--meta candidate))
+        (doc (company-clang--candidate-doc candidate))
         (emptylines "\n\n"))
     (unless (and doc meta)
       (setq emptylines ""))
@@ -213,14 +217,18 @@ properties."
         (save-match-data
           (when (string-match ":" match)
             (setq match (substring match 0 (match-beginning 0)))))
-        (let ((meta (match-string-no-properties 2)))
+        (let ((meta (match-string-no-properties 2))
+              (doc (match-string-no-properties 3))
+              index)
           (when (and meta (not (string= match meta)))
             (put-text-property 0 1 'meta
                                (company-clang--strip-formatting meta)
-                               match)))
-        (push match lines)
-        (let ((doc (match-string-no-properties 3)))
-          (push (list match doc) company-clang-summary-list))))
+                               match))
+          (when doc
+            (setq index (cl-gensym))
+            (put-text-property 0 1 'cc-tag index match)
+            (push (list index doc) company-clang--doc-list)))
+        (push match lines)))
     ;; BUGTESTING (time measurement)
     ;; ----------
     (setq parse-time-stop (current-time-pico))
@@ -278,7 +286,7 @@ properties."
         (goto-char (point-min))))))
 
 (defun company-clang--start-process (prefix callback &rest args)
-  (setq company-clang-summary-list nil)
+  (setq company-clang--doc-list nil)
   (let ((objc (derived-mode-p 'objc-mode))
         (buf (get-buffer-create "*clang-output*"))
         (process-adaptive-read-buffering nil))
@@ -441,7 +449,7 @@ passed via standard input."
                       (lambda (cb) (company-clang--candidates arg cb))))
     (meta       (company-clang--meta arg))
     (annotation (company-clang--annotation arg))
-    (doc-buffer (company-clang-doc-buffer arg))
+    (doc-buffer (company-clang--doc-buffer arg))
     (post-completion (let ((anno (company-clang--annotation arg)))
                        (when (and company-clang-insert-arguments anno)
                          (insert anno)
