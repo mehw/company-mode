@@ -25,6 +25,8 @@
 ;; (add-to-list 'load-path "/path/to/directory")
 ;; (require 'company-regexp-tests)
 
+;;; Code:
+
 ;; DEFINE HERE THE PREFIXES
 (defvar company-regexp--test-prefixes
   '("foo"
