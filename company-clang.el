@@ -89,6 +89,12 @@ or automatically through a custom `company-clang-prefix-guesser'."
 Requires Clang version 3.2 or above."
   :type 'boolean)
 
+(defcustom company-clang-parse-system-headers-comments t
+  "When non-nil, parse system headers' documentation comments.
+
+Requires Clang version 3.2 or above."
+  :type 'boolean)
+
 (defcustom company-clang-documentation-fill-column 70
   "Column beyond which automatic line-wrapping should happen."
   :type 'integer)
@@ -343,7 +349,9 @@ properties."
   (append '("-fsyntax-only" "-Xclang" "-code-completion-macros")
           (when (and company-clang-parse-comments
                      (company-clang--can-parse-comments))
-            (list "-Xclang" "-code-completion-brief-comments"))
+            (append (list "-Xclang" "-code-completion-brief-comments")
+                    (when company-clang-parse-system-headers-comments
+                      (list "-Xclang" "--no-system-header-prefix="))))
           (unless (company-clang--auto-save-p)
             (list "-x" (company-clang--lang-option)))
           company-clang-arguments
