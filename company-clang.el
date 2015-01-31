@@ -83,17 +83,14 @@ or automatically through a custom `company-clang-prefix-guesser'."
 (defconst company-clang-parse-comments-min-version 3.2
   "Starting from version 3.2 Clang can parse comments.")
 
-(defcustom company-clang-parse-comments t
-  "When non-nil, parse completions' documentation comments.
+(defcustom company-clang-parse-comments 'all
+  "Parse completions' documentation comments.
 
 Requires Clang version 3.2 or above."
-  :type 'boolean)
-
-(defcustom company-clang-parse-system-headers-comments t
-  "When non-nil, parse system headers' documentation comments.
-
-Requires Clang version 3.2 or above."
-  :type 'boolean)
+  :type '(radio
+          (const :tag "Do not parse comments" nil)
+          (const :tag "Parse comments in files but not in system headers." t)
+          (const :tag "Parse comments in files and in all headers." all)))
 
 (defcustom company-clang-documentation-fill-column 70
   "Column beyond which automatic line-wrapping should happen."
@@ -345,13 +342,19 @@ properties."
                   'utf-8
                   t))))))
 
+(defun company-clang--build-parse-comments-args nil
+  (when (and company-clang-parse-comments
+             (company-clang--can-parse-comments))
+    (let ((args (list "-Xclang" "-code-completion-brief-comments")))
+      (when (eq company-clang-parse-comments 'all)
+        (setq args
+              (append args
+                      (list "-Xclang" "--no-system-header-prefix="))))
+      args)))
+
 (defsubst company-clang--build-complete-args (pos)
   (append '("-fsyntax-only" "-Xclang" "-code-completion-macros")
-          (when (and company-clang-parse-comments
-                     (company-clang--can-parse-comments))
-            (append (list "-Xclang" "-code-completion-brief-comments")
-                    (when company-clang-parse-system-headers-comments
-                      (list "-Xclang" "--no-system-header-prefix="))))
+          (company-clang--build-parse-comments-args)
           (unless (company-clang--auto-save-p)
             (list "-x" (company-clang--lang-option)))
           company-clang-arguments
