@@ -83,6 +83,18 @@ or automatically through a custom `company-clang-prefix-guesser'."
 (defconst company-clang-parse-comments-min-version 3.2
   "Starting from version 3.2 Clang can parse comments.")
 
+(defcustom company-clang-socket-file (quote ("clang-output" nil))
+  "Experimental (tested on GNU/Linux).
+
+Capture Clang's output trough a socket file (could be faster than
+capturing the output directly into Emacs."
+  :type '(radio
+          (const :tag "Disable" nil)
+          (group
+           (string :tag "Filename" "clang-output")
+           (checklist
+            (const :tag "Debug (leave socket file in temporary directory)" t)))))
+
 (defcustom company-clang-parse-comments 'all
   "Parse completions' documentation comments.
 
@@ -288,6 +300,27 @@ properties."
         (setq buffer-read-only t)
         (goto-char (point-min))))))
 
+(defun company-clang--create-socket (buf args)
+  (let ((socket-file (concat temporary-file-directory
+                             (car company-clang-socket-file))))
+    ;; If `socket-file' isn't a file, `company-clang-socket-file' is
+    ;; nil or doesn't have a file name set.
+    (if (and (not (file-directory-p socket-file))
+             (with-temp-file socket-file t))
+        (progn
+          (setq args (append args (list ">" socket-file)))
+          (list socket-file
+                #'(lambda ()
+                    (apply #'start-process-shell-command
+                           "company-clang" nil company-clang-executable args))))
+      (progn
+        (when company-clang-socket-file
+          (message "Cannot create socket file: falling back on stdout."))
+        (list nil
+              #'(lambda ()
+                  (apply #'start-process
+                         "company-clang" buf company-clang-executable args)))))))
+
 (defun company-clang--start-process (prefix callback &rest args)
   (setq company-clang--doc-list nil)
   (let ((objc (derived-mode-p 'objc-mode))
@@ -296,14 +329,17 @@ properties."
     (with-current-buffer buf (erase-buffer))
     (if (get-buffer-process buf)
         (funcall callback nil)
-      (let ((process (apply #'start-process "company-clang" buf
-                            company-clang-executable args)))
+      (let* ((cmd (company-clang--create-socket buf args))
+             (socket-file (car cmd))
+             (process (car (cdr cmd)))
+             (socket-debug (car (car (cdr company-clang-socket-file)))))
         ;; BUGTESTING (time measurement)
         ;; ----------
         (when (eq process-time-start nil)
           (setq process-time-start (current-time-pico))
           (message "process-start: %s" process-time-start))
         ;; ----------
+        (setq process (funcall process))
         (set-process-sentinel
          process
          (lambda (proc status)
@@ -312,6 +348,15 @@ properties."
               callback
               (let ((res (process-exit-status proc)))
                 (with-current-buffer buf
+                  ;; If `socket-file' is a string, due to previous
+                  ;; processing, it is a legit file.
+                  (when (stringp socket-file)
+                    (if (file-readable-p socket-file)
+                        (progn
+                          (insert-file-contents-literally socket-file)
+                          (unless socket-debug
+                            (delete-file socket-file)))
+                      (message "Cannot read socket file.")))
                   (unless (eq 0 res)
                     (company-clang--handle-error res args))
                   ;; Still try to get any useful input.
