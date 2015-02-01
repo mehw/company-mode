@@ -116,7 +116,7 @@ Requires Clang version 3.2 or above."
                  (const :tag "Center" center)
                  (const :tag "None" nil)))
 
-(defvar company-clang--doc-list
+(defvar company-clang--doc-list nil
   "Association list of tag's index + documentation.")
 
 (defun company-clang--can-parse-comments nil
