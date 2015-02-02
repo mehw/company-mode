@@ -308,18 +308,18 @@ properties."
     (if (and (not (file-directory-p socket-file))
              (with-temp-file socket-file t))
         (progn
-          (setq args (append args (list ">" socket-file)))
+          (setq args (append args (list "1>" socket-file)))
           (list socket-file
-                #'(lambda ()
-                    (apply #'start-process-shell-command
-                           "company-clang" nil company-clang-executable args))))
+                (lambda ()
+                  (apply #'start-process-shell-command
+                         "company-clang" nil company-clang-executable args))))
       (progn
         (when company-clang-socket-file
           (message "Cannot create socket file: falling back on stdout."))
         (list nil
-              #'(lambda ()
-                  (apply #'start-process
-                         "company-clang" buf company-clang-executable args)))))))
+              (lambda ()
+                (apply #'start-process
+                       "company-clang" buf company-clang-executable args)))))))
 
 (defun company-clang--start-process (prefix callback &rest args)
   (setq company-clang--doc-list nil)
