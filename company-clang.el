@@ -359,7 +359,6 @@ properties."
                       (message "Cannot read socket file.")))
                   (unless (eq 0 res)
                     (company-clang--handle-error res args))
-                  ;; Still try to get any useful input.
                   ;; BUGTESTING (time measurement)
                   ;; ----------
                   (setq process-time-stop (current-time-pico))
@@ -368,6 +367,7 @@ properties."
                     (message "process-delta: %s" (time-pico-to-seconds delta)))
                   (setq process-time-start nil)
                   ;; ----------
+                  ;; Still try to get any useful input.
                   (company-clang--parse-output prefix objc)))))))
         (unless (company-clang--auto-save-p)
           (send-region process (point-min) (point-max))
