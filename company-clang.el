@@ -83,17 +83,17 @@ or automatically through a custom `company-clang-prefix-guesser'."
 (defconst company-clang-parse-comments-min-version 3.2
   "Starting from version 3.2 Clang can parse comments.")
 
-(defcustom company-clang-socket-file (quote ("clang-output" nil))
+(defcustom company-clang-temporary-file (quote ("clang-output" nil))
   "Experimental (tested on GNU/Linux).
 
-Capture Clang's output trough a socket file (could be faster than
-capturing the output directly into Emacs."
+Capture Clang's output trough a temporary file (could be faster
+than capturing the output directly into Emacs."
   :type '(radio
           (const :tag "Disable" nil)
           (group
            (string :tag "Filename" "clang-output")
            (checklist
-            (const :tag "Debug (leave socket file in temporary directory)" t)))))
+            (const :tag "Debug (leave temporary file in temporary directory)" t)))))
 
 (defcustom company-clang-parse-comments 'all
   "Parse completions' documentation comments.
@@ -124,13 +124,33 @@ Requires Clang version 3.2 or above."
   (>= company-clang--version
       company-clang-parse-comments-min-version))
 
-(defun company-clang--candidate-index (candidate)
-  "Extract the index of from a CANDIDATE."
+(defun company-clang--set-candidate-index (candidate)
+  "Set the index of a CANDIDATE and return the index."
+  (let ((index (cl-gensym)))
+    (put-text-property 0 1 'cc-tag index candidate)
+    index))
+
+(defun company-clang--get-candidate-index (candidate)
+  "Extract the index of a CANDIDATE."
   (get-text-property 0 'cc-tag candidate))
 
-(defun company-clang--candidate-doc (candidate)
+(defun company-clang--set-candidate-doc (doc candidate)
+  "Set the documentation of a CANDIDATE and return its index.
+
+Prevent duplicated records."
+  (let* ((index (company-clang--get-candidate-index candidate))
+         (record (assoc index company-clang--doc-list)))
+    (if index
+        (when record
+          (setq company-clang--doc-list
+                (delq record company-clang--doc-list)))
+      (setq index (company-clang--set-candidate-index candidate)))
+    (push (list index doc) company-clang--doc-list)
+    index))
+
+(defun company-clang--get-candidate-doc (candidate)
   "Extract the documentation of a CANDIDATE from `company-clang--doc-list'."
-  (let ((index (company-clang--candidate-index candidate))
+  (let ((index (company-clang--get-candidate-index candidate))
         (record))
     (when index
       (setq record (assoc index company-clang--doc-list))
@@ -139,7 +159,7 @@ Requires Clang version 3.2 or above."
 (defun company-clang--doc-buffer (candidate)
   "Create the documentation buffer for a CANDIDATE."
   (let ((meta (company-clang--meta candidate))
-        (doc (company-clang--candidate-doc candidate))
+        (doc (company-clang--get-candidate-doc candidate))
         (emptylines "\n\n"))
     (unless (and doc meta)
       (setq emptylines ""))
@@ -233,16 +253,13 @@ properties."
           (when (string-match ":" match)
             (setq match (substring match 0 (match-beginning 0)))))
         (let ((meta (match-string-no-properties 2))
-              (doc (match-string-no-properties 3))
-              index)
+              (doc (match-string-no-properties 3)))
           (when (and meta (not (string= match meta)))
             (put-text-property 0 1 'meta
                                (company-clang--strip-formatting meta)
                                match))
           (when doc
-            (setq index (cl-gensym))
-            (put-text-property 0 1 'cc-tag index match)
-            (push (list index doc) company-clang--doc-list)))
+            (company-clang--set-candidate-doc doc match)))
         (push match lines)))
     ;; BUGTESTING (time measurement)
     ;; ----------
@@ -300,22 +317,24 @@ properties."
         (setq buffer-read-only t)
         (goto-char (point-min))))))
 
-(defun company-clang--create-socket (buf args)
-  (let ((socket-file (concat temporary-file-directory
-                             (car company-clang-socket-file))))
-    ;; If `socket-file' isn't a file, `company-clang-socket-file' is
+(defun company-clang--redirect-output (buf args)
+  "Redirect Clang's output to `company-clang-temporary-file'
+instead than piping it directly to BUF when required."
+  (let ((tmp-file (concat temporary-file-directory
+                          (car company-clang-temporary-file))))
+    ;; If `tmp-file' isn't a file, `company-clang-temporary-file' is
     ;; nil or doesn't have a file name set.
-    (if (and (not (file-directory-p socket-file))
-             (with-temp-file socket-file t))
+    (if (and (not (file-directory-p tmp-file))
+             (with-temp-file tmp-file t))
         (progn
-          (setq args (append args (list "1>" socket-file)))
-          (list socket-file
+          (setq args (append args (list "1>" tmp-file)))
+          (list tmp-file
                 (lambda ()
                   (apply #'start-process-shell-command
                          "company-clang" nil company-clang-executable args))))
       (progn
-        (when company-clang-socket-file
-          (message "Cannot create socket file: falling back on stdout."))
+        (when company-clang-temporary-file
+          (message "Cannot create temporary file: falling back on stdout."))
         (list nil
               (lambda ()
                 (apply #'start-process
@@ -329,10 +348,10 @@ properties."
     (with-current-buffer buf (erase-buffer))
     (if (get-buffer-process buf)
         (funcall callback nil)
-      (let* ((cmd (company-clang--create-socket buf args))
-             (socket-file (car cmd))
+      (let* ((cmd (company-clang--redirect-output buf args))
+             (tmp-file (car cmd))
              (process (car (cdr cmd)))
-             (socket-debug (car (car (cdr company-clang-socket-file)))))
+             (tmp-debug (car (car (cdr company-clang-temporary-file)))))
         ;; BUGTESTING (time measurement)
         ;; ----------
         (when (eq process-time-start nil)
@@ -348,15 +367,16 @@ properties."
               callback
               (let ((res (process-exit-status proc)))
                 (with-current-buffer buf
-                  ;; If `socket-file' is a string, due to previous
+                  ;; If `tmp-file' is a string, due to previous
                   ;; processing, it is a legit file.
-                  (when (stringp socket-file)
-                    (if (file-readable-p socket-file)
+                  (when (stringp tmp-file)
+                    (if (file-readable-p tmp-file)
                         (progn
-                          (insert-file-contents-literally socket-file)
-                          (unless socket-debug
-                            (delete-file socket-file)))
-                      (message "Cannot read socket file.")))
+                          (erase-buffer)
+                          (insert-file-contents-literally tmp-file)
+                          (unless tmp-debug
+                            (delete-file tmp-file)))
+                      (message "Cannot read temporary file.")))
                   (unless (eq 0 res)
                     (company-clang--handle-error res args))
                   ;; BUGTESTING (time measurement)
@@ -387,7 +407,7 @@ properties."
                   'utf-8
                   t))))))
 
-(defun company-clang--build-parse-comments-args nil
+(defun company-clang--parse-comments-args nil
   (when (and company-clang-parse-comments
              (company-clang--can-parse-comments))
     (let ((args (list "-Xclang" "-code-completion-brief-comments")))
@@ -399,7 +419,7 @@ properties."
 
 (defsubst company-clang--build-complete-args (pos)
   (append '("-fsyntax-only" "-Xclang" "-code-completion-macros")
-          (company-clang--build-parse-comments-args)
+          (company-clang--parse-comments-args)
           (unless (company-clang--auto-save-p)
             (list "-x" (company-clang--lang-option)))
           company-clang-arguments
