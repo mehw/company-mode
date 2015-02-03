@@ -149,12 +149,10 @@ Prevent duplicated records."
     index))
 
 (defun company-clang--get-candidate-doc (candidate)
-  "Extract the documentation of a CANDIDATE from `company-clang--doc-list'."
-  (let ((index (company-clang--get-candidate-index candidate))
-        (record))
-    (when index
-      (setq record (assoc index company-clang--doc-list))
-      (car (cdr record)))))
+  "Extract the documentation of a CANDIDATE."
+  (let* ((index (company-clang--get-candidate-index candidate))
+         (record (assoc index company-clang--doc-list)))
+    (car (cdr record))))
 
 (defun company-clang--doc-buffer (candidate)
   "Create the documentation buffer for a CANDIDATE."
@@ -408,14 +406,13 @@ instead than piping it directly to BUF when required."
                   t))))))
 
 (defun company-clang--parse-comments-args nil
+  "Clang's arguments needed when parsing comments."
   (when (and company-clang-parse-comments
              (company-clang--can-parse-comments))
-    (let ((args (list "-Xclang" "-code-completion-brief-comments")))
-      (when (eq company-clang-parse-comments 'all)
-        (setq args
-              (append args
-                      (list "-Xclang" "--no-system-header-prefix="))))
-      args)))
+    (append
+     (list "-Xclang" "-code-completion-brief-comments")
+     (when (eq company-clang-parse-comments 'all)
+       (list "-Xclang" "--no-system-header-prefix=")))))
 
 (defsubst company-clang--build-complete-args (pos)
   (append '("-fsyntax-only" "-Xclang" "-code-completion-macros")
