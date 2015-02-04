@@ -746,9 +746,33 @@ before calling this function."
                (list (concat item ": " (number-to-string sum)))))))
     (with-current-buffer buf
       (goto-char (point-max))
-      (insert "\n")
+      (insert "+-\n")
+      (insert "|Company Clang Parse Comments: "
+              (if (nth 0 company-clang-parse-comments)
+                  "Yes"
+                "No") "\n")
+      (insert "|  Include system headers: "
+              (if (nth 1 company-clang-parse-comments)
+                  "on"
+                "off") "\n")
+      (insert "|  Parse comments only on demand: "
+              (if (nth 1 company-clang-parse-comments)
+                  "on"
+                "off") "\n")
+      (let ((tmp-file (nth 0 company-clang-temporary-file))
+            (tmp-debug (car (nth 1 company-clang-temporary-file))))
+        (insert "|Company Clang Temporary File:\n"
+                (if tmp-file
+                    (concat
+                     "|  Filename: " tmp-file "\n"
+                     (if tmp-debug
+                         "|  [X] "
+                       "|  [ ] ")
+                     "Debug (leave temporary file in temporary directory)")
+                  "|  Disabled") "\n"))
+      (insert "\\\n"))
       (dolist (item results)
-        (insert (concat item "\n"))))))
+        (insert " | " item "\n"))))
 ;; ----------
 
 (provide 'company-clang)
