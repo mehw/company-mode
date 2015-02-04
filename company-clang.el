@@ -756,7 +756,7 @@ before calling this function."
                   "on"
                 "off") "\n")
       (insert "|  Parse comments only on demand: "
-              (if (nth 1 company-clang-parse-comments)
+              (if (nth 2 company-clang-parse-comments)
                   "on"
                 "off") "\n")
       (let ((tmp-file (nth 0 company-clang-temporary-file))
