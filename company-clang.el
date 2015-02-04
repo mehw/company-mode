@@ -705,5 +705,47 @@ passed via standard input."
                            (company-template-c-like-templatify
                             (concat arg anno))))))))
 
+;; BUGTESTING (time measurement)
+;; ----------
+(defun company-clang-calc-deltas-media nil
+  "Calculate the media of the time measurements gathered in the
+current buffer.
+
+Print the result at the end of the current buffer.
+
+Be sure that the time measurements are correct, sometimes the
+first data printed are incorrect, so remove them from the buffer
+before calling this function."
+  (interactive)
+  (let ((content (buffer-string))
+        (buf (current-buffer))
+        (filter "^%s: \\(.*\\)$")
+        sum count results)
+    (with-temp-buffer
+      (insert content)
+      (dolist (item (list "process-delta"
+                          "parse-delta"
+                          "delta"
+                          "ast-delta"))
+        (setq sum 0)
+        (setq count 0)
+        (goto-char (point-min))
+        (while (re-search-forward (format filter item) nil t)
+          (setq count (+ count 1))
+          (setq sum (+ sum
+                       (string-to-number
+                        (match-string-no-properties 1)))))
+        (setq sum (/ sum count))
+        (setq results
+              (append
+               results
+               (list (concat item ": " (number-to-string sum)))))))
+    (with-current-buffer buf
+      (goto-char (point-max))
+      (insert "\n")
+      (dolist (item results)
+        (insert (concat item "\n"))))))
+;; ----------
+
 (provide 'company-clang)
 ;;; company-clang.el ends here
