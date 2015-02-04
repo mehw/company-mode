@@ -95,14 +95,16 @@ than capturing the output directly into Emacs."
            (checklist
             (const :tag "Debug (leave temporary file in temporary directory)" t)))))
 
-(defcustom company-clang-parse-comments 'all
+(defcustom company-clang-parse-comments '(t t t)
   "Parse completions' documentation comments.
 
 Requires Clang version 3.2 or above."
-  :type '(radio
-          (const :tag "Do not parse comments" nil)
-          (const :tag "Parse comments in files but not in system headers." t)
-          (const :tag "Parse comments in files and in all headers." all)))
+  :type '(choice
+          (const :tag "No" nil)
+          (group :tag "Yes"
+                 (const :tag "Yes" t) ;; new line trick
+                 (boolean :tag "   Include system headers" t)
+                 (boolean :tag "   Parse comments only on demand" t))))
 
 (defcustom company-clang-documentation-fill-column 70
   "Column beyond which automatic line-wrapping should happen."
@@ -118,6 +120,64 @@ Requires Clang version 3.2 or above."
 
 (defvar company-clang--doc-list nil
   "Association list of tag's index + documentation.")
+
+(defconst company-clang--AST-head
+  "^Dumping %s:$")
+
+(defconst company-clang--AST-Decl
+  "^.* %s '\\(.*\\)'$")
+
+(defconst company-clang--AST-TextComment
+  "TextComment.*Text=\" \\(.*\\) \"$")
+
+(defconst company-clang--meta-no-prefix
+  "\\(%s\\).*\\'")
+
+(defconst company-clang--meta-no-args
+  "\\( [a-zA-Z0-9_:]+\\)\\(?:,\\|)\\)")
+
+(defvar company-clang-set-ast-doc-hook nil
+  "Hooks to call after `company-clang--set-ast-doc' has been run
+with a positive result.")
+
+(defun company-clang--strip-meta (candidate)
+  "Retrun CANDIDATE's meta stripped from prefix and args."
+  (let* ((prefix (regexp-quote candidate))
+         (meta (company-clang--meta candidate))
+         (strip-prefix
+          (format company-clang--meta-no-prefix prefix))
+         (strip-args company-clang--meta-no-args))
+    (replace-regexp-in-string
+     strip-args ""
+     (replace-regexp-in-string
+      strip-prefix "" meta nil nil 1) nil nil 1)))
+
+(defun company-clang--parse-AST (candidate)
+  "Return the CANDIDATE's AST.
+
+Resolve function overloads."
+  (goto-char (point-min))
+  (let* ((prefix (regexp-quote candidate))
+         (meta (company-clang--strip-meta candidate))
+         (head (format company-clang--AST-head prefix))
+         (decl (format company-clang--AST-Decl prefix))
+         (abort nil)
+         proto head-beg head-end empty-line)
+    (while (not abort)
+      (if (not (re-search-forward head nil t))
+          (setq abort t)
+        (setq head-beg (match-beginning 0))
+        (setq head-end (match-end 0))
+        (if (not (re-search-forward "^$" nil t))
+            (setq abort t)
+          (setq empty-line (match-end 0))
+          (goto-char (+ head-end 1))
+          (when (re-search-forward decl empty-line t)
+            (setq proto (match-string-no-properties 1))
+            (when (string= proto meta)
+              (setq abort 'ok))))))
+    (when (eq abort 'ok)
+      (buffer-substring head-beg empty-line))))
 
 (defun company-clang--can-parse-comments nil
   "Verify that the version of Clang in use can parse comments."
@@ -152,10 +212,28 @@ Prevent duplicated records."
   "Extract the documentation of a CANDIDATE."
   (let* ((index (company-clang--get-candidate-index candidate))
          (record (assoc index company-clang--doc-list)))
+    (unless record
+      (add-hook 'company-clang-set-ast-doc-hook 'company-clang--doc-buffer)
+      (company-clang--AST-process candidate 'company-clang--set-ast-doc))
     (car (cdr record))))
+
+(defun company-clang--set-ast-doc (candidate ast)
+  "Set the documentation of a CANDIDATE reading it from its AST."
+  (let (doc)
+    (when (stringp ast)
+      (with-temp-buffer
+        (insert ast)
+        (goto-char (point-min))
+        (re-search-forward company-clang--AST-TextComment nil t)
+        (setq doc (match-string-no-properties 1))))
+    (company-clang--set-candidate-doc doc candidate)
+    (when doc
+      (run-hook-with-args 'company-clang-set-ast-doc-hook candidate))))
 
 (defun company-clang--doc-buffer (candidate)
   "Create the documentation buffer for a CANDIDATE."
+  ;; FIXME: should the hook have an auto-remove feature?
+  (remove-hook 'company-clang-set-ast-doc-hook 'company-clang--doc-buffer)
   (let ((meta (company-clang--meta candidate))
         (doc (company-clang--get-candidate-doc candidate))
         (emptylines "\n\n"))
@@ -338,6 +416,66 @@ instead than piping it directly to BUF when required."
                 (apply #'start-process
                        "company-clang" buf company-clang-executable args)))))))
 
+(defun company-clang--AST-process (candidate callback)
+  "Process the CANDIDATE's AST.
+
+Call CALLBACK passing CANDIDATE and its AST as arguments."
+  ;; NOTE: build the args while in the original buffer.
+  (let* ((prefix (regexp-quote candidate))
+         (args (company-clang--build-AST-args prefix))
+         (buf (get-buffer-create "*clang-output*"))
+         (process-adaptive-read-buffering nil))
+    (unless (get-buffer-process buf)
+      (let* ((cmd (company-clang--redirect-output buf args))
+             (tmp-file (car cmd))
+             (process (car (cdr cmd)))
+             (tmp-debug (car (car (cdr company-clang-temporary-file)))))
+        ;; BUGTESTING (time measurement)
+        ;; ----------
+        (when (eq ast-time-start nil)
+          (setq ast-time-start (current-time-pico))
+          (message "ast-start: %s" ast-time-start))
+        ;; ----------
+        (setq process (funcall process))
+        (set-process-sentinel
+         process
+         (lambda (proc status)
+           (unless (string-match-p "hangup" status)
+             (funcall
+              callback
+              candidate
+              (let ((res (process-exit-status proc)))
+                (with-current-buffer buf
+                  ;; If `tmp-file' is a string, due to previous
+                  ;; processing, it is a legit file.
+                  (when (stringp tmp-file)
+                    (if (file-readable-p tmp-file)
+                        (progn
+                          (erase-buffer)
+                          (insert-file-contents-literally tmp-file)
+                          (unless tmp-debug
+                            (delete-file tmp-file)))
+                      (message "Cannot read temporary file.")))
+                  ;; FIXME: `company-clang--handle-error' seems to
+                  ;; create troubles some time, we should suppress
+                  ;; Clang's errors, in the meantime do not consider
+                  ;; the return code 1 as an error.
+                  (unless (or (eq 0 res) (eq 1 res))
+                    (company-clang--handle-error res args))
+                  ;; BUGTESTING (time measurement)
+                  ;; ----------
+                  (setq ast-time-stop (current-time-pico))
+                  (let ((delta (- ast-time-stop ast-time-start)))
+                    (message "ast-end: %s" (current-time-pico))
+                    (message "ast-delta: %s" (time-pico-to-seconds delta)))
+                  (setq ast-time-start nil)
+                  ;; ----------
+                  (company-clang--parse-AST candidate)))))))
+        (unless (company-clang--auto-save-p)
+          (send-region process (point-min) (point-max))
+          (send-string process "\n")
+          (process-send-eof process))))))
+
 (defun company-clang--start-process (prefix callback &rest args)
   (setq company-clang--doc-list nil)
   (let ((objc (derived-mode-p 'objc-mode))
@@ -405,14 +543,50 @@ instead than piping it directly to BUF when required."
                   'utf-8
                   t))))))
 
+(defun company-clang--expand-args (args)
+  "Get the full Clang's front-end command line instruction."
+  (with-temp-buffer
+    (call-process-shell-command
+     (mapconcat 'identity
+                (append
+                 (list "echo |")
+                 (list company-clang-executable)
+                 (list "-v") args) " ") nil t nil)
+    (let (beg end)
+      (goto-char (point-min))
+      (when (re-search-forward "^ \".*\"" nil t)
+        (setq beg (+ (match-end 0) 1))
+        (when (re-search-forward "^clang.*version.*$" nil t)
+          (setq end (- (match-beginning 0) 1))
+          (split-string (buffer-substring beg end) " "))))))
+
 (defun company-clang--parse-comments-args nil
-  "Clang's arguments needed when parsing comments."
+  "Return the Clang's args needed to parse comments."
   (when (and company-clang-parse-comments
              (company-clang--can-parse-comments))
-    (append
-     (list "-Xclang" "-code-completion-brief-comments")
-     (when (eq company-clang-parse-comments 'all)
-       (list "-Xclang" "--no-system-header-prefix=")))))
+    (let ((parse-system (nth 1 company-clang-parse-comments))
+          (on-demand (nth 2 company-clang-parse-comments)))
+      (append
+       (when parse-system
+         (list "-Xclang" "--no-system-header-prefix="))
+       (unless on-demand
+         (list "-Xclang" "-code-completion-brief-comments"))))))
+
+(defun company-clang--build-AST-args (prefix)
+  "Return Clang's args to dump the AST filtering by PREFIX"
+  (delete
+   "-fcolor-diagnostics"
+   (company-clang--expand-args
+    (append '("-fsyntax-only" "-w" "-Xclang" "-ast-dump"
+              "-Xclang" "-ast-dump-filter" "-Xclang")
+            (list prefix)
+            (company-clang--parse-comments-args)
+            (unless (company-clang--auto-save-p)
+              (list "-x" (company-clang--lang-option)))
+            company-clang-arguments
+            (when (stringp company-clang--prefix)
+              (list "-include" (expand-file-name company-clang--prefix)))
+            (list (if (company-clang--auto-save-p) buffer-file-name "-"))))))
 
 (defsubst company-clang--build-complete-args (pos)
   (append '("-fsyntax-only" "-Xclang" "-code-completion-macros")

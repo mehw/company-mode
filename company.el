@@ -652,6 +652,8 @@ asynchronous call into synchronous.")
 (defvar parse-time-stop nil)
 (defvar process-time-start nil)
 (defvar process-time-stop nil)
+(defvar ast-time-start nil)
+(defvar ast-time-stop nil)
 
 (defun current-time-pico nil
   "Return `current-time' in pico-seconds."
@@ -1511,6 +1513,8 @@ from the rest of the back-ends in the group, if any, will be left at the end."
   (setq parse-time-stop nil)
   (setq process-time-start nil)
   (setq process-time-stop nil)
+  (setq ast-time-start nil)
+  (setq ast-time-stop nil)
   ;; ----------
   (unwind-protect
       (when company-prefix
