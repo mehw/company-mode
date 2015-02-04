@@ -211,10 +211,13 @@ Prevent duplicated records."
 (defun company-clang--get-candidate-doc (candidate)
   "Extract the documentation of a CANDIDATE."
   (let* ((index (company-clang--get-candidate-index candidate))
-         (record (assoc index company-clang--doc-list)))
+         (record (assoc index company-clang--doc-list))
+         (on-demand (nth 2 company-clang-parse-comments)))
     (unless record
-      (add-hook 'company-clang-set-ast-doc-hook 'company-clang--doc-buffer)
-      (company-clang--AST-process candidate 'company-clang--set-ast-doc))
+      (when (and on-demand
+                 (company-clang--can-parse-comments))
+        (add-hook 'company-clang-set-ast-doc-hook 'company-clang--doc-buffer)
+        (company-clang--AST-process candidate 'company-clang--set-ast-doc)))
     (car (cdr record))))
 
 (defun company-clang--set-ast-doc (candidate ast)
