@@ -722,7 +722,7 @@ before calling this function."
   (interactive)
   (let ((content (buffer-string))
         (buf (current-buffer))
-        (filter "^%s: \\(.*\\)$")
+        (filter "^%s: \\([0-9.]+\\)$")
         sum count results)
     (with-temp-buffer
       (insert content)
@@ -743,7 +743,9 @@ before calling this function."
         (setq results
               (append
                results
-               (list (concat item ": " (number-to-string sum)))))))
+               (list (concat
+                      item ": " (number-to-string sum)
+                      " (out of " (number-to-string count) ")"))))))
     (with-current-buffer buf
       (goto-char (point-max))
       (insert "+-\n")
