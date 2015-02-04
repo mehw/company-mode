@@ -735,7 +735,8 @@ before calling this function."
           (setq sum (+ sum
                        (string-to-number
                         (match-string-no-properties 1)))))
-        (setq sum (/ sum count))
+        (when (and (> sum 0) (> count 0))
+          (setq sum (/ sum count)))
         (setq results
               (append
                results
