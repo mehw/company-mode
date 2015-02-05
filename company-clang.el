@@ -710,8 +710,8 @@ passed via standard input."
 
 ;; BUGTESTING (time measurement)
 ;; ----------
-(defun company-clang-calc-deltas-media nil
-  "Calculate the media of the time measurements gathered in the
+(defun company-clang-calc-deltas-mean nil
+  "Calculate the mean of the time measurements gathered in the
 current buffer.
 
 Print the result at the end of the current buffer.
