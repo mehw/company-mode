@@ -321,9 +321,8 @@ properties."
         lines match)
     ;; BUGTESTING (time measurement)
     ;; ----------
-    (when (eq parse-time-start nil)
-      (setq parse-time-start (current-time-pico))
-      (message "parse-start: %s" parse-time-start))
+    (company-bugtesting--lapse
+     'company-clang--parse-output t)
     ;; ----------
     (while (re-search-forward pattern nil t)
       (setq match (match-string-no-properties 1))
@@ -342,11 +341,10 @@ properties."
         (push match lines)))
     ;; BUGTESTING (time measurement)
     ;; ----------
-    (setq parse-time-stop (current-time-pico))
-    (let ((delta (- parse-time-stop parse-time-start)))
-      (message "parse-end: %s" (current-time-pico))
-      (message "parse-delta: %s" (time-pico-to-seconds delta)))
-    (setq parse-time-start nil)
+    (company-bugtesting--lapse
+     'company-clang--parse-output nil
+     'company-clang-parse-comments
+     'company-clang-temporary-file)
     ;; ----------
     lines))
 
@@ -435,9 +433,8 @@ Call CALLBACK passing CANDIDATE and its AST as arguments."
              (tmp-debug (car (car (cdr company-clang-temporary-file)))))
         ;; BUGTESTING (time measurement)
         ;; ----------
-        (when (eq ast-time-start nil)
-          (setq ast-time-start (current-time-pico))
-          (message "ast-start: %s" ast-time-start))
+        (company-bugtesting--lapse
+         'company-clang--AST-process t)
         ;; ----------
         (setq process (funcall process))
         (set-process-sentinel
@@ -467,11 +464,10 @@ Call CALLBACK passing CANDIDATE and its AST as arguments."
                     (company-clang--handle-error res args))
                   ;; BUGTESTING (time measurement)
                   ;; ----------
-                  (setq ast-time-stop (current-time-pico))
-                  (let ((delta (- ast-time-stop ast-time-start)))
-                    (message "ast-end: %s" (current-time-pico))
-                    (message "ast-delta: %s" (time-pico-to-seconds delta)))
-                  (setq ast-time-start nil)
+                  (company-bugtesting--lapse
+                   'company-clang--AST-process nil
+                   'company-clang-parse-comments
+                   'company-clang-temporary-file)
                   ;; ----------
                   (company-clang--parse-AST candidate)))))))
         (unless (company-clang--auto-save-p)
@@ -493,9 +489,8 @@ Call CALLBACK passing CANDIDATE and its AST as arguments."
              (tmp-debug (car (car (cdr company-clang-temporary-file)))))
         ;; BUGTESTING (time measurement)
         ;; ----------
-        (when (eq process-time-start nil)
-          (setq process-time-start (current-time-pico))
-          (message "process-start: %s" process-time-start))
+        (company-bugtesting--lapse
+         'company-clang--start-process t)
         ;; ----------
         (setq process (funcall process))
         (set-process-sentinel
@@ -520,11 +515,10 @@ Call CALLBACK passing CANDIDATE and its AST as arguments."
                     (company-clang--handle-error res args))
                   ;; BUGTESTING (time measurement)
                   ;; ----------
-                  (setq process-time-stop (current-time-pico))
-                  (let ((delta (- process-time-stop process-time-start)))
-                    (message "process-end: %s" (current-time-pico))
-                    (message "process-delta: %s" (time-pico-to-seconds delta)))
-                  (setq process-time-start nil)
+                  (company-bugtesting--lapse
+                   'company-clang--start-process nil
+                   'company-clang-parse-comments
+                   'company-clang-temporary-file)
                   ;; ----------
                   ;; Still try to get any useful input.
                   (company-clang--parse-output prefix objc)))))))
@@ -674,10 +668,7 @@ passed via standard input."
   (interactive (list 'interactive))
   ;; BUGTESTING (time measurement)
   ;; ----------
-  (when (and (eq time-start nil)
-             (eq command 'prefix))
-    (setq time-start (current-time-pico))
-    (message "prefix: %s" time-start))
+  (company-bugtesting--clang-laspe command)
   ;; ----------
   (cl-case command
     (interactive (company-begin-backend 'company-clang))
@@ -710,71 +701,375 @@ passed via standard input."
 
 ;; BUGTESTING (time measurement)
 ;; ----------
-(defun company-clang-calc-deltas-mean nil
-  "Calculate the mean of the time measurements gathered in the
-current buffer.
+(defgroup company-bugtesting nil
+  "Clang bugtesting options."
+  :group 'company)
 
-Print the result at the end of the current buffer.
+(defvar company-bugtesting--lapse-list nil
+  "Collect `company-bugtesting--lapse' results.
 
-Be sure that the time measurements are correct, sometimes the
-first data printed are incorrect, so remove them from the buffer
-before calling this function."
+The function `company-bugtesting--add-lapse' will define the
+structure of this list.")
+
+(defun company-bugtesting--current-time-pico nil
+  "Return `current-time' in pico-seconds."
+  (let ((time (current-time))
+        (hi) (lo) (ms) (ps))
+    (setq hi (nth 0 time))
+    (setq lo (nth 1 time))
+    (setq ms (nth 2 time))
+    (setq ps (nth 3 time))
+    (setq hi (* hi (expt 2 16)))
+    (+ (* (+ hi lo) (expt 10 12))
+       (* ms (expt 10 6))
+       ps)))
+
+(defun company-bugtesting--pico-to-secs (pico)
+  "Convert pico-seconds into seconds."
+  (let ((exponent (expt 10 -12)))
+    (* pico exponent)))
+
+(defun company-bugtesting--trim-list (symbol-or-cons max &optional tail)
+  "Trim the value or `cadr' of SYMBOL-OR-CONS if it is a list to
+MAX number of elements. This is a destructive operation.
+
+SYMBOL-OR-CONS if a symbol which value is a list, or it is a cons
+which `cadr' is a list.
+
+If MAX is less or equal to 0 the list will be wiped.  If TAIL is
+non-nil remove the last elements, otherwise remove the elements
+at the beginning.
+
+Return non-nil if any element have been removed."
+  (let* (symbol
+         (target-list
+          (if (not (symbolp symbol-or-cons))
+              (car (cdr symbol-or-cons))
+            (setq symbol t)
+            (symbol-value symbol-or-cons))))
+    (when (listp target-list)
+      (let ((len (length target-list))
+            (cdr-pointer target-list)
+            n-cdr)
+        (if (<= max 0)
+            (if (not symbol)
+                (setcdr symbol-or-cons nil)
+              (set symbol-or-cons nil)
+              (setq target-list (symbol-value symbol-or-cons))
+              (setq cdr-pointer target-list))
+          (when (> len max)
+            (if tail
+                (progn
+                  (setq n-cdr 1)
+                  (while (< n-cdr max)
+                    (setq cdr-pointer (cdr cdr-pointer))
+                    (setq n-cdr (+ n-cdr 1)))
+                  (setcdr cdr-pointer nil))
+              (setq n-cdr (- len max))
+              (while (> n-cdr 0)
+                (setq cdr-pointer (cdr cdr-pointer))
+                (setq n-cdr (- n-cdr 1)))
+              (if (not symbol)
+                  (setcdr symbol-or-cons (list cdr-pointer))
+                (set symbol-or-cons cdr-pointer)
+                (setq target-list (symbol-value symbol-or-cons))))))
+        (> len (length
+                (if symbol
+                    target-list
+                  (car (cdr symbol-or-cons)))))))))
+
+(defun company-bugtesting--do-trim (symbol max)
+  "Trim the list `company-bugtesting--lapse-list' to:
+1. `company-bugtesting-max-categories', or
+2. `company-bugtesting-max-events', or
+3. `company-bugtesting-max-lapses'.
+
+SYMBOL is one of the symbols listed above.  MAX is the new
+maximum number of elements allowed."
+  (cond ((eq symbol 'company-bugtesting-max-categories)
+         (setq company-bugtesting-max-categories max)
+         (company-bugtesting--trim-list
+          'company-bugtesting--lapse-list
+          company-bugtesting-max-categories t))
+        ((eq symbol 'company-bugtesting-max-events)
+         (setq company-bugtesting-max-events max)
+         (dolist (record company-bugtesting--lapse-list)
+           (company-bugtesting--trim-list
+            record company-bugtesting-max-events)))
+        ((eq symbol 'company-bugtesting-max-lapses)
+         (setq company-bugtesting-max-lapses max)
+         (dolist (record company-bugtesting--lapse-list)
+           (dolist (lapses (car (cdr record)))
+             (company-bugtesting--trim-list
+              lapses company-bugtesting-max-lapses))))))
+
+(defconst company-bugtesting-buffer "*clang-bugtesting*"
+  "Buffer dedicated to bugtesting messages.")
+
+(defcustom company-bugtesting-dump-messages t
+  "Dump messages to the buffer `company-bugtesting-buffer'."
+  :group 'company-bugtesting
+  :type 'boolean)
+
+(defcustom company-bugtesting-max-categories 100
+  "Maximum number of option categories to collect when capturing
+events' time lapses.
+
+This value is took into account the next time an event's time
+lapse is captured.
+
+The function `company-bugtesting--lapse' collects events' time
+lapses, organizing them in option categories."
+  :set 'company-bugtesting--do-trim
+  :type 'integer)
+
+(defcustom company-bugtesting-max-events 100
+  "Maximum number of events to collect per option category when
+capturing events' time lapses.
+
+This value is took into account the next time an event's time
+lapse is captured.
+
+The function `company-bugtesting--lapse' collects events' time
+lapses, organizing them in option categories."
+  :set 'company-bugtesting--do-trim
+  :type 'integer)
+
+(defcustom company-bugtesting-max-lapses 100
+  "Maximum number of time lapses to collect per event when
+capturing events' time lapses.
+
+This value is took into account the next time an event's time
+lapse is captured.
+
+The function `company-bugtesting--lapse' collects events' time
+lapses, organizing them in option categories."
+  :set 'company-bugtesting--do-trim
+  :type 'integer)
+
+;; +BUGTESTING (company-clang time measurement)
+;; +----------
+(defun company-bugtesting--clang-clock-start nil
+  "Start the clock to measure `company-clang' time lapse."
+  (company-bugtesting--lapse 'company-clang t))
+
+(defun company-bugtesting--clang-clock-stop (command)
+  "Stop the clock to measure `company-clang' time lapse."
+  (setq command command) ;; Suppress warning when byte-compiling.
+  (company-bugtesting--lapse
+   'company-clang nil
+   'company-clang-parse-comments
+   'company-clang-temporary-file))
+
+(defun company-bugtesting--clang-clock-reset (command)
+  "Reset the clock to measure `company-clang' time lapse."
+  (setq command command) ;; Suppress warning when byte-compiling.
+  (company-bugtesting--lapse
+   'company-clang 'reset))
+
+(defun company-bugtesting--clang-clock-set (symbol value)
+  "Setup `company-clang' to measure its time lapse."
+  (when (eq symbol 'company-bugtesting-clang-tooltip-lapse)
+    (if value
+        (progn
+          (push 'company-bugtesting--clang-clock-stop company-frontends)
+          (add-hook 'company-completion-cancelled-hook
+                    'company-bugtesting--clang-clock-reset))
+      (setq company-frontends
+            (delq 'company-bugtesting--clang-clock-stop company-frontends))
+      (remove-hook 'company-completion-cancelled-hook
+                   'company-bugtesting--clang-clock-reset))
+    (setq company-bugtesting-clang-tooltip-lapse value)))
+
+(defun company-bugtesting--clang-laspe (command)
+  "Measure `company-clang' time lapse from when the candidates
+are collected to when the tooltip appears."
+  (when (and company-bugtesting-clang-tooltip-lapse
+             (eq command 'candidates))
+    (company-bugtesting--clang-clock-start)))
+
+(defcustom company-bugtesting-clang-tooltip-lapse t
+  "When non-nil measure `company-clang' time lapse."
+  :set 'company-bugtesting--clang-clock-set
+  :type 'boolean)
+;; +----------
+
+(defun company-bugtesting--message (format-string &rest args)
+  "Insert the message into the `company-bugtesting-buffer' buffer
+when `company-bugtesting-dump-messages' is non-nil.
+
+FORMAT-STRING is a format control string documented by the
+`format' function.  ARGS is a sequence of elements to convert
+into strings."
+  (when company-bugtesting-dump-messages
+    (let ((bugbuf (get-buffer-create company-bugtesting-buffer)))
+      (with-current-buffer bugbuf
+        (buffer-disable-undo)
+        (insert (apply #'format format-string args))))))
+
+(defun company-bugtesting--lapse (clock start &rest symbols)
+  "Measure a time lapse and insert the result into the variable
+`company-bugtesting--lapse-list'.
+
+If `company-bugtesting-dump-messages' is non-nil, brief messages
+are inserted into the `company-bugtesting-buffer' buffer.
+
+CLOCK is a symbol name.  If START is non-nil the timer starts,
+otherwise it stops, but if it is `reset' the timer resets and no
+time measurement is collected; while the timer is running do not
+use the same CLOCK to measure a different time lapse.
+
+SYMBOLS is a sequence of symbols, their name and value are stored
+into `company-bugtesting--lapse-list' to categorize the time
+lapse, they are collected only if START is nil (when the clock
+stops), otherwise they are ignored."
+  (let ((timer-start (intern (format "%s-timer-start" clock)))
+        (timer-stop (intern (format "%s-timer-stop" clock)))
+        (descr-clock (format "%s-%s" clock (if start "start" "stop")))
+        (clock-key (format "%s-lapse" clock))
+        clock-start clock-stop clock-lapse lapse-secs)
+    (if (eq start 'reset)
+        (progn
+          (unintern timer-start nil)
+          (unintern timer-stop nil)
+          (company-bugtesting--message "%s: reset\n" clock-key))
+      (if start
+          (progn
+            (set timer-start (company-bugtesting--current-time-pico))
+            (setq clock-start (symbol-value timer-start))
+            (company-bugtesting--message "%s: %d\n" descr-clock clock-start))
+        (when (and (boundp timer-start)
+                   (setq clock-start (symbol-value timer-start)))
+          (set timer-stop (company-bugtesting--current-time-pico))
+          (setq clock-stop (symbol-value timer-stop))
+          (setq clock-lapse (- clock-stop clock-start))
+          (setq lapse-secs (company-bugtesting--pico-to-secs clock-lapse))
+          (apply #'company-bugtesting--add-lapse clock-key clock-lapse symbols)
+          (company-bugtesting--message "%s: %d\n" descr-clock clock-stop)
+          (company-bugtesting--message "%s: %f\n" clock-key lapse-secs)
+          (unintern timer-start nil)
+          (unintern timer-stop nil))))))
+
+(defun company-bugtesting--add-lapse (clock-key clock-lapse &rest symbols)
+  "Add lapse values to `company-bugtesting--lapse-list'.
+
+CLOCK-KEY is the name of the time lapse measured.  CLOCK-LAPSE is
+the value of the time lapse.
+
+SYMBOLS is a sequence of symbols, their name and value are stored
+into `company-bugtesting--lapse-list' to categorize the time
+lapse.
+
+Structure given to `company-bugtesting--lapse-list':
+
+  (((sym-0 val-w sym-1 val-x) (clock-a (lapse-0 lapse-1))
+                              (clock-b (lapse-2 lapse-3)))
+   ((sym-0 val-y sym-1 val-z) (clock-a (lapse-4 lapse-5))))
+
+
+If there are no symbols it is an uncategorized situation:
+
+  (((nil (nil)) (clock-a (lapse-0 lapse-1 lapse-4 lapse-5))
+                (clock-b (lapse-2 lapse-3))))"
+  (let (index record lapses sequence tail)
+    (dolist (s symbols)
+      (setq index (append index (list s (symbol-value s)))))
+    (setq record (assoc index company-bugtesting--lapse-list))
+    (setq lapses (assoc clock-key (car (cdr record))))
+    (if lapses
+        (progn
+          (setq sequence (car (cdr lapses)))
+          (setq tail (last sequence))
+          ;; FIFO
+          (if tail
+              (setcdr tail (list clock-lapse))
+            (setcdr lapses (list (list clock-lapse))))
+          (company-bugtesting--trim-list
+           lapses company-bugtesting-max-lapses))
+      (setq lapses (list clock-key (list clock-lapse)))
+      (if record
+          (progn
+            (setq sequence (car (cdr record)))
+            (setq tail (last sequence))
+            ;; FIFO
+            (if tail
+                (setcdr tail (list lapses))
+              (setcdr record (list (list lapses))))
+            (company-bugtesting--trim-list
+             record company-bugtesting-max-events))
+        (setq record (list index (list lapses)))
+        ;; LIFO
+        (push record company-bugtesting--lapse-list)
+        (company-bugtesting--trim-list
+         'company-bugtesting--lapse-list
+         company-bugtesting-max-categories t)))))
+
+(defun company-bugtesting-erase-lapses nil
+  "Erase all the collected lapses.
+
+Set `company-bugtesting--lapse-list' to nil."
   (interactive)
-  (let ((content (buffer-string))
-        (buf (current-buffer))
-        (filter "^%s: \\([0-9.]+\\)$")
-        sum count results)
-    (with-temp-buffer
-      (insert content)
-      (dolist (item (list "process-delta"
-                          "parse-delta"
-                          "delta"
-                          "ast-delta"))
-        (setq sum 0)
-        (setq count 0)
-        (goto-char (point-min))
-        (while (re-search-forward (format filter item) nil t)
-          (setq count (+ count 1))
-          (setq sum (+ sum
-                       (string-to-number
-                        (match-string-no-properties 1)))))
-        (when (and (> sum 0) (> count 0))
-          (setq sum (/ sum count)))
-        (setq results
-              (append
-               results
-               (list (concat
-                      item ": " (number-to-string sum)
-                      " (out of " (number-to-string count) ")"))))))
-    (with-current-buffer buf
-      (goto-char (point-max))
-      (insert "+-\n")
-      (insert "|Company Clang Parse Comments: "
-              (if (nth 0 company-clang-parse-comments)
-                  "Yes"
-                "No") "\n")
-      (insert "|  Include system headers: "
-              (if (nth 1 company-clang-parse-comments)
-                  "on"
-                "off") "\n")
-      (insert "|  Parse comments only on demand: "
-              (if (nth 2 company-clang-parse-comments)
-                  "on"
-                "off") "\n")
-      (let ((tmp-file (nth 0 company-clang-temporary-file))
-            (tmp-debug (car (nth 1 company-clang-temporary-file))))
-        (insert "|Company Clang Temporary File:\n"
-                (if tmp-file
-                    (concat
-                     "|  Filename: " tmp-file "\n"
-                     (if tmp-debug
-                         "|  [X] "
-                       "|  [ ] ")
-                     "Debug (leave temporary file in temporary directory)")
-                  "|  Disabled") "\n"))
-      (insert "\\\n"))
-      (dolist (item results)
-        (insert " | " item "\n"))))
+  (when (yes-or-no-p "Erase all the collected lapses? ")
+    (setq company-bugtesting--lapse-list nil)
+    (if company-bugtesting--lapse-list
+        (message "Could not erase lapses.")
+      (message "Lapses erased."))))
+
+(defun company-bugtesting-dump-lapses nil
+  "Dump the mean values of all the collected lapses into the
+buffer `company-bugtesting-buffer'."
+  (interactive)
+  (let ((bugbuf (get-buffer-create company-bugtesting-buffer))
+        index symbol value describe clock-key n clock-lapses mean)
+    (with-current-buffer bugbuf
+      (buffer-enable-undo)
+      (dolist (record company-bugtesting--lapse-list)
+        (insert "+-\n")
+        (setq index (car record))
+        (while index
+          (setq symbol (pop index))
+          (setq value (pop index))
+          (setq describe (format "%s%s" symbol "-describe"))
+          (when (intern-soft describe)
+            (insert (funcall (intern describe) value))))
+        (insert "\\\n")
+        (dolist (lapses (car (cdr record)))
+          (setq clock-key (car lapses))
+          (setq clock-lapses (car (cdr lapses)))
+          (setq n (length clock-lapses))
+          (setq mean (/ (apply '+ 0 clock-lapses) n))
+          (setq mean (company-bugtesting--pico-to-secs mean))
+          (insert (format " |%s: %s seconds (mean of %s)\n" clock-key mean n)))))))
+
+(defun company-clang-parse-comments-describe (value)
+  "Describe `company-clang-parse-comments' reading its VALUE."
+  (concat
+   "|Company Clang Parse Comments: "
+   (if (not value)
+       "No\n"
+     (concat
+      "Yes\n"
+      "|  Include system headers: "
+      (if (nth 1 value)
+          "on\n"
+        "off\n")
+      "|  Parse comments only on demand: "
+      (if (nth 2 value)
+          "on\n"
+        "off\n")))))
+
+(defun company-clang-temporary-file-describe (value)
+  "Describe `company-clang-temporary-file' reading its VALUE."
+  (concat
+   "|Company Clang Temporary File:\n"
+   (if (not value)
+       "|  Disable\n"
+     (concat
+      "|  Filename: " (nth 0 value) "\n"
+      (if (nth 1 value)
+          "|  [X] "
+        "|  [ ] ")
+      "Debug (leave temporary file in temporary directory)\n"))))
 ;; ----------
 
 (provide 'company-clang)

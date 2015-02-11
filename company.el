@@ -644,36 +644,6 @@ asynchronous call into synchronous.")
 
 (defvar company--disabled-backends nil)
 
-;; BUGTESTING (time measurement)
-;; ----------
-(defvar time-start nil)
-(defvar time-stop nil)
-(defvar parse-time-start nil)
-(defvar parse-time-stop nil)
-(defvar process-time-start nil)
-(defvar process-time-stop nil)
-(defvar ast-time-start nil)
-(defvar ast-time-stop nil)
-
-(defun current-time-pico nil
-  "Return `current-time' in pico-seconds."
-  (let ((time (current-time))
-        (hi) (lo) (ms) (ps))
-    (setq hi (nth 0 time))
-    (setq lo (nth 1 time))
-    (setq ms (nth 2 time))
-    (setq ps (nth 3 time))
-    (setq hi (* hi (expt 2 16)))
-    (+ (* (+ hi lo) (expt 10 12))
-       (* ms (expt 10 6))
-       ps)))
-
-(defun time-pico-to-seconds (pico)
-  "Convert pico-seconds into seconds."
-  (let ((exponent (expt 10 -12)))
-    (* pico exponent)))
-;; ----------
-
 (defun company-init-backend (backend)
   (and (symbolp backend)
        (not (fboundp backend))
@@ -1505,17 +1475,6 @@ from the rest of the back-ends in the group, if any, will be left at the end."
     (company-call-frontends 'update)))
 
 (defun company-cancel (&optional result)
-  ;; BUGTESTING (time measurement)
-  ;; ----------
-  (setq time-start nil)
-  (setq time-stop nil)
-  (setq parse-time-start nil)
-  (setq parse-time-stop nil)
-  (setq process-time-start nil)
-  (setq process-time-stop nil)
-  (setq ast-time-start nil)
-  (setq ast-time-stop nil)
-  ;; ----------
   (unwind-protect
       (when company-prefix
         (if (stringp result)
@@ -2538,14 +2497,6 @@ Returns a negative number if the tooltip should be displayed above point."
       (max 3 (min company-tooltip-limit below)))))
 
 (defun company-pseudo-tooltip-show (row column selection)
-  ;; BUGTESTING (time measurement)
-  ;; ----------
-  (setq time-stop (current-time-pico))
-  (let ((delta (- time-stop time-start)))
-    (message "tooltip: %s" (current-time-pico))
-    (message "delta: %s" (time-pico-to-seconds delta)))
-  (setq time-start nil)
-  ;; ----------
   (company-pseudo-tooltip-hide)
   (save-excursion
 
