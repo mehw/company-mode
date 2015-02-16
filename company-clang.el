@@ -80,8 +80,13 @@ or automatically through a custom `company-clang-prefix-guesser'."
     (insert-file-contents-literally file nil beg end)
     (buffer-string)))
 
-(defconst company-clang-parse-comments-min-version 3.2
-  "Starting from version 3.2 Clang can parse comments.")
+;; The option "-code-completion-brief-comments" works since Clang
+;; version 3.2.  The options "-ast-dump -ast-dump-filter" are part of
+;; Clang since version 3.2, but can parse comments starting from
+;; version 3.3.
+(defconst company-clang-parse-comments-min-version 3.3
+  "Starting from version 3.2 Clang can parse comments, and starting
+from version 3.3 Clang's AST can parse comments.")
 
 (defcustom company-clang-temporary-file (quote ("clang-output" nil))
   "Experimental (tested on GNU/Linux).
@@ -121,32 +126,31 @@ Requires Clang version 3.2 or above."
 (defvar company-clang--doc-list nil
   "Association list of tag's index + documentation.")
 
-(defconst company-clang--AST-head
-  "^Dumping %s:$")
-
-(defconst company-clang--AST-Decl
-  "^.* %s '\\(.*\\)'$")
-
-(defconst company-clang--AST-TextComment
-  "TextComment.*Text=\" \\(.*\\) \"$")
-
-(defconst company-clang--meta-no-prefix
-  "\\(%s\\).*\\'")
-
-(defconst company-clang--meta-no-args
-  "\\( [a-zA-Z0-9_:]+\\)\\(?:,\\|)\\)")
-
 (defvar company-clang-set-ast-doc-hook nil
   "Hooks to call after `company-clang--set-ast-doc' has been run
 with a positive result.")
 
+;; The function
+;;  /** This is a comment. */
+;;  int foobar(int a, float b){return 0;}
+;; is expressed by Clang's AST version 3.3 as follows:
+;;
+;;  Dumping foobar:
+;;  FunctionDecl 0x2d7b210 <./test.h:5:1, col:37> col:5 foobar 'int (int, float)'
+;;  |-ParmVarDecl 0x2d7b0d0 <col:12, col:16> col:16 a 'int'
+;;  |-ParmVarDecl 0x2d7b140 <col:19, col:25> col:25 b 'float'
+;;  |-CompoundStmt 0x2d7b328 <col:27, col:37>
+;;  | `-ReturnStmt 0x2d7b2e0 <col:28, col:35>
+;;  |   `-IntegerLiteral 0x2d7b2c0 <col:35> 'int' 0
+;;  `-FullComment 0x3d5aad0 <line:4:4, col:23>
+;;    `-ParagraphComment 0x3d5aaa0 <col:4, col:23>
+;;        `-TextComment 0x3d5aa70 <col:4, col:23> Text=" This is a comment. "
 (defun company-clang--strip-meta (candidate)
   "Retrun CANDIDATE's meta stripped from prefix and args."
   (let* ((prefix (regexp-quote candidate))
          (meta (company-clang--meta candidate))
-         (strip-prefix
-          (format company-clang--meta-no-prefix prefix))
-         (strip-args company-clang--meta-no-args))
+         (strip-prefix (format "\\(%s\\).*\\'" prefix))
+         (strip-args "\\( [a-zA-Z0-9_:]+\\)\\(?:,\\|)\\)"))
     (replace-regexp-in-string
      strip-args ""
      (replace-regexp-in-string
@@ -155,12 +159,13 @@ with a positive result.")
 (defun company-clang--parse-AST (candidate)
   "Return the CANDIDATE's AST.
 
-Resolve function overloads."
+Resolve function overloads by searching the candidate's meta in
+the Clang's AST."
   (goto-char (point-min))
   (let* ((prefix (regexp-quote candidate))
          (meta (company-clang--strip-meta candidate))
-         (head (format company-clang--AST-head prefix))
-         (decl (format company-clang--AST-Decl prefix))
+         (head (format "^Dumping %s:$" prefix))
+         (decl (format "^.* %s '\\(.*\\)'$" prefix))
          (abort nil)
          proto head-beg head-end empty-line)
     (while (not abort)
@@ -227,7 +232,7 @@ Prevent duplicated records."
       (with-temp-buffer
         (insert ast)
         (goto-char (point-min))
-        (re-search-forward company-clang--AST-TextComment nil t)
+        (re-search-forward "TextComment.*Text=\" \\(.*\\) \"$" nil t)
         (setq doc (match-string-no-properties 1))))
     (company-clang--set-candidate-doc doc candidate)
     (when doc
@@ -426,6 +431,9 @@ Call CALLBACK passing CANDIDATE and its AST as arguments."
          (args (company-clang--build-AST-args prefix))
          (buf (get-buffer-create "*clang-output*"))
          (process-adaptive-read-buffering nil))
+    (with-current-buffer buf
+      (buffer-disable-undo)
+      (erase-buffer))
     (unless (get-buffer-process buf)
       (let* ((cmd (company-clang--redirect-output buf args))
              (tmp-file (car cmd))
@@ -451,7 +459,6 @@ Call CALLBACK passing CANDIDATE and its AST as arguments."
                   (when (stringp tmp-file)
                     (if (file-readable-p tmp-file)
                         (progn
-                          (erase-buffer)
                           (insert-file-contents-literally tmp-file)
                           (unless tmp-debug
                             (delete-file tmp-file)))
@@ -480,7 +487,9 @@ Call CALLBACK passing CANDIDATE and its AST as arguments."
   (let ((objc (derived-mode-p 'objc-mode))
         (buf (get-buffer-create "*clang-output*"))
         (process-adaptive-read-buffering nil))
-    (with-current-buffer buf (erase-buffer))
+    (with-current-buffer buf
+      (buffer-disable-undo)
+      (erase-buffer))
     (if (get-buffer-process buf)
         (funcall callback nil)
       (let* ((cmd (company-clang--redirect-output buf args))
@@ -506,7 +515,6 @@ Call CALLBACK passing CANDIDATE and its AST as arguments."
                   (when (stringp tmp-file)
                     (if (file-readable-p tmp-file)
                         (progn
-                          (erase-buffer)
                           (insert-file-contents-literally tmp-file)
                           (unless tmp-debug
                             (delete-file tmp-file)))
@@ -677,10 +685,7 @@ passed via standard input."
               (error "Company found no clang executable"))
             (setq company-clang--version (company-clang-version))
             (when (< company-clang--version company-clang-required-version)
-              (error "Company requires clang version 1.1"))
-            (when (and company-clang-parse-comments
-                       (not (company-clang--can-parse-comments)))
-              (error "The current version of Clang cannot parse comments"))))
+              (error "Company requires clang version 1.1"))))
     (prefix (and (memq major-mode company-clang-modes)
                  buffer-file-name
                  company-clang-executable
@@ -690,7 +695,10 @@ passed via standard input."
                       (lambda (cb) (company-clang--candidates arg cb))))
     (meta       (company-clang--meta arg))
     (annotation (company-clang--annotation arg))
-    (doc-buffer (company-clang--doc-buffer arg))
+    (doc-buffer (when (and company-clang-parse-comments
+                           (not (company-clang--can-parse-comments)))
+                  (error "The current version of Clang cannot parse comments"))
+                (company-clang--doc-buffer arg))
     (post-completion (let ((anno (company-clang--annotation arg)))
                        (when (and company-clang-insert-arguments anno)
                          (insert anno)
