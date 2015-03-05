@@ -232,7 +232,7 @@ Prevent duplicated records."
       (with-temp-buffer
         (insert ast)
         (goto-char (point-min))
-        (re-search-forward "TextComment.*Text=\" \\(.*\\) \"$" nil t)
+        (re-search-forward "TextComment.*Text=\"\\(.*\\)\"$" nil t)
         (setq doc (match-string-no-properties 1))))
     (company-clang--set-candidate-doc doc candidate)
     (when doc
